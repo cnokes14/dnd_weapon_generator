@@ -1,0 +1,8 @@
+# {REPLACE_NAME_STR}:
+    **Hit roll:** {REPLACE_HIT_STR}
+    **Damage roll:** {REPLACE_DAMAGE_STR}
+    **Range:** {REPLACE_RANGE_STR}
+    **Perks:**
+        {REPLACE_PERK_STR}
+    **Description:** {REPLACE_DESC_STR}
+

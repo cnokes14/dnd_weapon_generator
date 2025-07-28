@@ -1,0 +1,19 @@
+{
+  "weapons": [
+    {
+      "name": "",
+      "hit": "",
+      "damage": "",
+      "range": "",
+      "description": ""
+    }
+  ],
+  "perks": [
+    
+  ],
+  "randoms": {
+    "<todo>" : [
+        ""
+    ]
+  }
+}

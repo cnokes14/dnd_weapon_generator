@@ -9,24 +9,36 @@ import (
 	"strings"
 )
 
-const INPUT_FILE_FLAG = "fin"
-const FORMAT_FILE_FLAG = "ffmt"
-const NGEN_FLAG = "ngen"
-const NPERK_FLAG = "nperk"
+// These constants handle flag titles via CLI.
+const INPUT_FILE_FLAG = "fin"   // Input file for data
+const FORMAT_FILE_FLAG = "ffmt" // Input file for format
+const NGEN_FLAG = "ngen"        // Number of generated weapons
+const NPERK_FLAG = "nperk"      // Number of selected perks per weapon
 
+// These constants handle what strings are replaced with what data in a
+// given input format file.
+const REPLACE_NAME_STR = "{REPLACE_NAME_STR}"
+const REPLACE_HIT_STR = "{REPLACE_HIT_STR}"
+const REPLACE_DAMAGE_STR = "{REPLACE_DAMAGE_STR}"
+const REPLACE_RANGE_STR = "{REPLACE_RANGE_STR}"
+const REPLACE_PERK_STR = "{REPLACE_PERK_STR}"
+const REPLACE_DESC_STR = "{REPLACE_DESC_STR}"
+
+// This struct handles individual flags.
 type flag_t struct {
-	fname    string
-	fdefault any
-	fhelp    string
-	fstring  *string
-	fint     *int
+	fname    string  // Name of the flag.
+	fdefault any     // Default value. Proper assignment allows functions to determine type.
+	fhelp    string  // Simple help string for CLI use
+	fstring  *string // If the type of fdefault is a string, the value is placed here.
+	fint     *int    // If the type of fdefault is an int, the value is placed here.
 }
 
+// All flags in a struct, for simpler passing around between functions.
 type all_flags_t struct {
-	fin   string
-	ffmt  string
-	ngen  int
-	nperk int
+	fin   string // INPUT_FILE_FLAG
+	ffmt  string // FORMAT_FILE_FLAG
+	ngen  int    // NGEN_FLAG
+	nperk int    // NPERK_FLAG
 }
 
 type weapon_base_t struct {
@@ -54,14 +66,15 @@ func parse_flags(fmap *map[string]*flag_t) {
 			(*fmap)[fkey].fstring = flag.String(fval.fname, fdefault, fval.fhelp)
 		} else if fdefault, ok := fval.fdefault.(int); ok {
 			(*fmap)[fkey].fint = flag.Int(fval.fname, fdefault, fval.fhelp)
+		} else {
+			fmt.Printf("Unsupported flag type! Discarding info...\n")
 		}
 	}
 	flag.Parse()
 }
 
 func add_flag(fmap *map[string]*flag_t, fname string, fdefault any, fhelp string) {
-	flag := flag_t{fname: fname, fdefault: fdefault, fhelp: fhelp}
-	(*fmap)[fname] = &flag
+	(*fmap)[fname] = &flag_t{fname: fname, fdefault: fdefault, fhelp: fhelp}
 }
 
 func build_and_read_flags() all_flags_t {
@@ -90,8 +103,13 @@ func read_file(flags_out all_flags_t) input_file_t {
 }
 
 func insert_randoms_string(str string, rands map[string][]string) string {
+	// Check for each random key in the string and replace as directed.
 	for key, value := range rands {
+		// Continue randomization while str contains key
 		for strings.Contains(str, key) {
+			// Pick a random string from the given list and replace one instance
+			//	of the key with it. This ensures that multiple instances of one
+			//	operation can be replaced by multiple different options.
 			rand := string(value[rand.IntN(len(rands[key]))])
 			str = strings.Replace(str, key, rand, 1)
 		}
@@ -100,41 +118,59 @@ func insert_randoms_string(str string, rands map[string][]string) string {
 }
 
 func insert_randoms_weapon(weapon weapon_generated_t, rands map[string][]string) weapon_generated_t {
-	for index, value := range weapon.perks {
-		weapon.perks[index] = insert_randoms_string(value, rands)
-	}
-	weapon.weapon.W_name = insert_randoms_string(weapon.weapon.W_name, rands)
+	// These objects are individual strings, so we only need to handle randoms once each.
+	weapon.weapon.W_name = insert_randoms_string(weapon.weapon.W_name, rands) // Reasonably should never be randomized.
 	weapon.weapon.W_damage = insert_randoms_string(weapon.weapon.W_damage, rands)
 	weapon.weapon.W_hit = insert_randoms_string(weapon.weapon.W_hit, rands)
 	weapon.weapon.W_range = insert_randoms_string(weapon.weapon.W_range, rands)
-	weapon.weapon.W_desc = insert_randoms_string(weapon.weapon.W_desc, rands)
+	weapon.weapon.W_desc = insert_randoms_string(weapon.weapon.W_desc, rands) // Reasonably should never be randomized.
+
+	// "Perks" is a list, so we need to loop through each element and update them individually.
+	for index, value := range weapon.perks {
+		weapon.perks[index] = insert_randoms_string(value, rands)
+	}
+
+	// The returned weapon should be 100% generated at this point.
 	return weapon
 }
 
 func build_random(nperk int, input_file input_file_t) weapon_generated_t {
+	// Randomly select a weapon. No bias / exclusion necessary.
 	weapon := input_file.I_weapons[rand.IntN(len(input_file.I_weapons))]
 
+	// Get and check the number of perks. We can't have more selected perks than available perks.
 	num_possible_perks := len(input_file.I_perks)
 	if num_possible_perks < nperk {
+		fmt.Printf("%d perks requested, but only %d perks exist. Providing %d perks.\n", nperk, num_possible_perks, num_possible_perks)
 		nperk = num_possible_perks
 	}
 
+	// This block handles selecting a set of perks. We create a set (map of int pointers, where
+	// 	all int pointers are nil) to keep track of which perks we already have, and end up with a list
+	//	of all selected perks. The list is not ordered (i.e., it is equally likely to have perks X,Y,Z
+	//	perks Y,X,Z).
 	perk_set := make(map[int]*int)
 	var perks []string
 	for n := 0; n < nperk; {
+		// Generate a random number. If that perk already exists in the set, generate a random number
+		//	again. This may take a while in situations where the number of perks is very large, and the
+		//	number of selected perks is very close to that number, but those situations are unrealistic.
 		randn := rand.IntN(num_possible_perks)
 		if _, ok := perk_set[randn]; ok {
 			continue
 		}
 		n++
 
-		perk := input_file.I_perks[randn]
-		perks = append(perks, perk)
+		// Append the selected perk to the list for usage, add the perk number to the set.
+		perks = append(perks, input_file.I_perks[randn])
 		perk_set[randn] = nil
 	}
+
+	// Final call before returning the generated weapon handles generating random values where needed.
 	return insert_randoms_weapon(weapon_generated_t{weapon: weapon, perks: perks}, input_file.I_rands)
 }
 
+// This function is just a simple list to make repeated calls to build_random() for weapon generation.
 func generate_weapons(flags_out all_flags_t, input_file input_file_t) []weapon_generated_t {
 	var generated_weapons []weapon_generated_t
 	for range flags_out.ngen {
@@ -142,13 +178,6 @@ func generate_weapons(flags_out all_flags_t, input_file input_file_t) []weapon_g
 	}
 	return generated_weapons
 }
-
-const REPLACE_NAME_STR = "{REPLACE_NAME_STR}"
-const REPLACE_HIT_STR = "{REPLACE_HIT_STR}"
-const REPLACE_DAMAGE_STR = "{REPLACE_DAMAGE_STR}"
-const REPLACE_RANGE_STR = "{REPLACE_RANGE_STR}"
-const REPLACE_PERK_STR = "{REPLACE_PERK_STR}"
-const REPLACE_DESC_STR = "{REPLACE_DESC_STR}"
 
 func generate_individual_output(ffmt string, weapon weapon_generated_t) string {
 	// Since these groups only have one "section" we can just run an old fashioned replace.
@@ -187,9 +216,15 @@ func generate_output(flags_out all_flags_t, weapons []weapon_generated_t) {
 }
 
 func main() {
+	// Parse input flags and generate our command struct using them.
 	flags_out := build_and_read_flags()
 
+	// Read the input json data file into a simple data struct.
 	input_file := read_file(flags_out)
+
+	// Actually perform generation.
 	generated_weapons := generate_weapons(flags_out, input_file)
+
+	// Format output and send to stdout.
 	generate_output(flags_out, generated_weapons)
 }
